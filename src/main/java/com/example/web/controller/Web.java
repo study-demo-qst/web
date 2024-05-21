@@ -1,4 +1,4 @@
-package com.example.web;
+package com.example.web.controller;
 
 import com.example.common.Comm;
 import com.example.logic.Logic; // Import the Logic class
