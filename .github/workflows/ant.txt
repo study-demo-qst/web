@@ -1,0 +1,21 @@
+buildspec.yml
+version: 0.2
+
+phases:
+  intall:
+    runtime-versions:
+      java: openjdk8
+  pre_build
+    commands:
+      - localedef -f UTF-8 -i ja_JP ja_JP.UTF-8
+      - export LANG="ja_JP.UTF-8"
+      - export LANGUAGE="ja_JP:ja"
+      - export LC_ALL="ja_JP.UTF-8"
+  build:
+    commands:
+      ant -Dresolver=xxx -Dbuildtime=`date "+%Y%m"`;
+  cache:
+    paths:
+      - '/root/.m2/**/*'
+
+これは何をしていますか？

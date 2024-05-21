@@ -1,0 +1,39 @@
+name: test
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: write-all
+
+    steps:
+    - name: echo
+      run: |
+        echo ${{ github.run_number }}
+
+    # 各リポジトリにタグを張る
+    - name: Extract the tag name, branch name, and repo list
+      id: vars
+      run: |
+        TAG_NAME='test1'
+        echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_OUTPUT
+        echo "REPO_LIST=common,logic" >> $GITHUB_OUTPUT
+        # リポジトリごとのブランチ名を設定
+        echo "BRANCH_NAMES=master,develop" >> $GITHUB_OUTPUT
+
+    - name: Clone Repos, Checkout Branch, and Push Tag
+      run: |
+        TAG_NAME=${{ steps.vars.outputs.TAG_NAME }}
+        REPO_LIST=${{ steps.vars.outputs.REPO_LIST }}
+        BRANCH_NAMES=${{ steps.vars.outputs.BRANCH_NAMES }}
+        IFS=',' read -r -a repos <<< "$REPO_LIST"
+        IFS=',' read -r -a branches <<< "$BRANCH_NAMES"
+        echo '############'
+        for i in "${!repos[@]}"; do
+          repo=${repos[i]}
+          branch=${branches[i]}
+          echo "repo=${repo}, branch=${branch}"
+        done
+        echo '############'

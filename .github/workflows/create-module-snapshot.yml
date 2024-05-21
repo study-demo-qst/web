@@ -1,0 +1,222 @@
+name: create snapshot module
+
+on:
+  # push:
+  workflow_dispatch:
+    inputs:
+      common_branch:
+        description: 'commonブランチ名(※)'
+        required: false
+        default: ''
+      logic_branch:
+        description: 'logicブランチ名(※)'
+        required: false
+        default: ''
+      label:
+        description: '※ブランチ未入力時の動作'
+        type: string
+        required: false
+        default: 'Workflowブランチ(なければdevelop)'
+      test:
+        description: 'テスト実行(参照リポジトリ含む)'
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: none
+
+    steps:
+    - name: echo
+      run: |
+        echo "${GITHUB_REF}"
+        echo "${GITHUB_REF#refs/head/}"
+        echo "${GITHUB_REF#refs/heads/}"
+        echo "${GITHUB_REF#refs/tags/}"
+        echo "${{ github.ref_name}}"
+        echo github.repository=${{ github.repository }}
+        
+    - name: Token発行（Github App）
+      id: generate_token
+      uses: tibdex/github-app-token@v1.8
+      with:
+        app_id: ${{ secrets.APP_ID }}
+        private_key: ${{ secrets.PRIVATE_KEY }}
+
+    - name: Token確認
+      env:
+        TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: |
+        echo "Access Token: ghs_"
+        echo "Access Token: ${TOKEN:4}"
+
+    # チェックアウトとブランチ設定
+    - name: Checkout common
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/common'
+        token: ${{ secrets.REPO_ETERNAL2 }}
+        fetch-depth: 0  # すべてのブランチをフェッチする
+        path: 'common'
+
+    - name: Configure Common Repository Branch
+      run: |
+        cd common
+        BRANCH=${{ inputs.common_branch }}
+        if [ -n "$BRANCH" ]; then
+          git checkout $BRANCH # branch指定あり
+        else
+          # branchが空の場合、ワークフローブランチを使用
+          WORKFLOW_BRANCH="${{ github.ref_name }}"
+          if git rev-parse --verify $WORKFLOW_BRANCH > /dev/null 2>&1; then
+            git checkout $WORKFLOW_BRANCH
+          else
+            git checkout develop # 無ければ、developブランチを使用
+          fi
+        fi
+      shell: bash
+
+    - name: Checkout logic
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/logic'
+        token: ${{ secrets.REPO_ETERNAL2 }}
+        fetch-depth: 0  # すべてのブランチをフェッチする
+        path: 'logic'
+
+    - name: Configure Logic Repository Branch
+      run: |
+        cd logic
+        BRANCH=${{ inputs.logic_branch }}
+        if [ -n "$BRANCH" ]; then
+          git checkout $BRANCH # branch指定あり
+        else
+          # branchが空の場合、ワークフローブランチを使用
+          WORKFLOW_BRANCH="${{ github.ref_name }}"
+          if git rev-parse --verify $WORKFLOW_BRANCH > /dev/null 2>&1; then
+            git checkout $WORKFLOW_BRANCH
+          else
+            git checkout develop # 無ければ、developブランチを使用
+          fi
+        fi
+      shell: bash
+
+    - name: Checkout web
+      uses: actions/checkout@v3
+      with:
+        path: 'web'
+        # ワークフロー内で実行されているので、refやrepositoryの指定は不要
+
+    - name: Set Up
+      id: setup
+      uses: ./web/.github/workflows/setup
+      with:
+        build_type: 'snapshot'
+
+    # 順番にビルドする
+    - name: Build and install common project
+      id: build_common
+      run: |
+        cd common
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+
+        # テストを実行し、結果を抽出
+        TEST_RESULT=$(mvn --settings ./settings.xml test -Dbuild_time=${{ steps.setup.outputs.build_time }} | grep 'Tests run:' | tail -n 1)
+        echo "test_result=$TEST_RESULT" >> $GITHUB_OUTPUT
+
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build logic project with Maven
+      id: build_logic
+      run: |
+        cd logic
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+
+        # テストを実行し、結果を抽出
+        TEST_RESULT=$(mvn --settings ./settings.xml test -Dbuild_time=${{ steps.setup.outputs.build_time }} | grep 'Tests run:' | tail -n 1)
+        echo "test_result=$TEST_RESULT" >> $GITHUB_OUTPUT
+
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build web project with Maven
+      id: build_web_customer
+      run: |
+        cd web
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+
+        # テストを実行し、結果を抽出
+        TEST_RESULT=$(mvn --settings ./settings.xml test -Dbuild_time=${{ steps.setup.outputs.build_time }} | grep 'Tests run:' | tail -n 1)
+        echo "test_result=$TEST_RESULT" >> $GITHUB_OUTPUT
+
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    # タグ名を設定
+    - name: Set tag name
+      id: set_tag_name
+      run: echo "TAG_NAME=${{ steps.setup.outputs.build_time }}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+    # 各リポジトリにタグを張る
+    - name: Tag common repository
+      run: |
+        cd common
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag logic repository
+      run: |
+        cd logic
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag web repository
+      run: |
+        cd web
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: snapshot module
+        path: web/target/*.jar
+
+    # GitHubリリースを作成
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.set_tag_name.outputs.tag_name }}
+        release_name: Release ${{ steps.set_tag_name.outputs.tag_name }}
+        draft: true
+        prerelease: false
+        body: |
+          ビルドに使用したリポジトリとブランチ
+          common: ${{ steps.build_common.outputs.branch }}
+          logic: ${{ steps.build_logic.outputs.branch }}
+          web: ${{ steps.build_web_customer.outputs.branch }}
+          
+          テスト：
+            common: ${{ steps.build_common.outputs.test_result }}
+            logic: ${{ steps.build_logic.outputs.test_result }}
+            web: ${{ steps.build_web_customer.outputs.test_result }}
+          ビルドに使用したタグ: ${{ steps.set_tag_name.outputs.tag_name }}
+          ビルドログ: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      
+    - name: Upload Artifact to GitHub Release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: web/target/web-${{ steps.setup.outputs.build_time }}.jar
+        asset_name: web.jar
+        asset_content_type: application/java-archive

@@ -1,0 +1,196 @@
+name: create module
+
+on:
+  workflow_dispatch:
+    inputs:
+      common_branch:
+        description: 'commonブランチ名'
+        required: false
+        default: ''
+      logic_branch:
+        description: 'logicブランチ名'
+        required: false
+        default: ''
+      label:
+        description: '空の場合はWorkflowと同じブランチを使用します(なければdevelop)'
+        type: boolean
+        required: true
+        default: true
+      test:
+        description: 'テスト実行(common/logic含む)'
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: write-all
+
+    steps:
+    - name: Set branch name
+      id: set_branch_name
+      run: |
+        for BRANCH_TYPE in common logic
+        do
+          INPUT_VAR_NAME="${BRANCH_TYPE}_branch"
+          echo "INPUT_VAR_NAME=$INPUT_VAR_NAME"
+          INPUT_BRANCH=${{ github.event.inputs[INPUT_VAR_NAME] }}
+          echo "INPUT_BRANCH=$INPUT_BRANCH"
+          
+          if [ -z "$INPUT_BRANCH" ]; then
+            BRANCH_NAME="${{ github.ref_name }}"
+            if [ -z "$(git ls-remote --heads origin $BRANCH_NAME)" ]; then
+              BRANCH_NAME="develop"
+            fi
+          else
+            BRANCH_NAME="$INPUT_BRANCH"
+          fi
+
+          echo "$BRANCH_TYPE=$BRANCH_NAME" >> $GITHUB_OUTPUT
+        done
+        echo "web-customer=${{ github.ref_name}}" >> $GITHUB_OUTPUT
+      shell: bash
+
+
+
+
+
+      # snapshot/release処理共通化のため、branch nameを設定しなおす
+    # - name: Set branch name
+    #   id: set_branch_name
+    #   run: |
+    #     echo "common=${{ github.event.inputs.common_branch }}" >> $GITHUB_OUTPUT
+    #     echo "logic=${{ github.event.inputs.logic_branch }}" >> $GITHUB_OUTPUT
+    #     echo "web-customer=${{ github.ref_name}}" >> $GITHUB_OUTPUT
+    #   shell: bash
+      
+    - name: echo
+      run: |
+        echo ${{ github.run_number }}
+
+    - name: Token発行（Github App）
+      id: generate_token
+      uses: tibdex/github-app-token@v1.8
+      with:
+        app_id: ${{ secrets.APP_ID }}
+        private_key: ${{ secrets.PRIVATE_KEY }}
+
+    - name: Token確認
+      env:
+        TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: |
+        echo "Access Token: ghs_"
+        echo "Access Token: ${TOKEN:4}"
+
+    # 最初にすべてのリポジトリをチェックアウトする
+    - name: Checkout common
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/common'
+        ref: 'develop'
+        token: ${{ secrets.REPO_ETERNAL }}
+        path: 'common'
+
+    - name: Checkout logic
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/logic'
+        ref: 'master'
+        token: ${{ secrets.REPO_ETERNAL }}
+        path: 'logic'
+
+    - name: Checkout web-customer
+      uses: actions/checkout@v3
+      with:
+        path: 'web-customer'
+        # web-customerリポジトリのワークフロー内で実行されているので、refやrepositoryの指定は不要
+
+    - name: Set Up
+      id: setup
+      uses: ./web-customer/.github/workflows/setup
+
+    # 順番にビルドする
+    - name: Build and install common project
+      id: build_common
+      run: |
+        cd common
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build logic project with Maven
+      id: build_logic
+      run: |
+        cd logic
+        mvn --settings ../common/settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build web-customer project with Maven
+      id: build_web_customer
+      run: |
+        cd web-customer
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    # タグ名を設定
+    - name: Set tag name
+      id: set_tag_name
+      run: echo "TAG_NAME=${{ steps.setup.outputs.build_time }}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+    # 各リポジトリにタグを張る
+    - name: Tag common repository
+      run: |
+        cd common
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag logic repository
+      run: |
+        cd logic
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag web-customer repository
+      run: |
+        cd web-customer
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: snapshot module
+        path: web-customer/target/*.jar
+
+    # # GitHubリリースを作成
+    # - name: Create Release
+    #   id: create_release
+    #   uses: actions/create-release@v1
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   with:
+    #     tag_name: ${{ steps.set_tag_name.outputs.tag_name }}
+    #     release_name: Release ${{ steps.set_tag_name.outputs.tag_name }}
+    #     draft: true
+    #     prerelease: false
+    #     body: |
+    #       ビルドに使用したリポジトリとブランチ
+    #       common: ${{ steps.build_common.outputs.branch }}
+    #       logic: ${{ steps.build_logic.outputs.branch }}
+    #       web-customer: ${{ steps.build_web_customer.outputs.branch }}
+          
+    #       ビルドに使用したタグ: ${{ steps.set_tag_name.outputs.tag_name }}
+    #       ビルドログ: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      
+    # - name: Upload Artifact to GitHub Release
+    #   uses: actions/upload-release-asset@v1
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   with:
+    #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+    #     asset_path: web-customer/target/web-customer-${{ steps.setup.outputs.build_time }}.jar
+    #     asset_name: web-customer.jar
+    #     asset_content_type: application/java-archive

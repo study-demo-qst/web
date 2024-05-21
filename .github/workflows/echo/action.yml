@@ -1,0 +1,59 @@
+# このファイル内ではsecretsは扱えない
+name: 'Set Up Echo'
+outputs:
+  pkg:
+    value: ${{ steps.set-pkg.outputs.pkg }}
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: echo
+      run: |
+        echo "${GITHUB_REF}"
+        echo "${GITHUB_REF#refs/head/}"
+        echo "${GITHUB_REF#refs/heads/}"
+        echo "${GITHUB_REF#refs/tags/}"
+        echo "${{ github.ref_name}}"
+        echo "-------"
+        echo ${{ github.run_number }}
+        echo ${{ github.ref }}
+        echo github.repository=${{ github.repository }}
+        echo ${{ github.repository_owner }}
+        echo ${{ github.sha }}
+        echo ${{ github.workflow }}
+        echo ${{ github.action }}
+        echo ${{ github.actor }}
+        echo ${{ github.job }}
+        echo ${{ github.event_name }}
+        echo ${{ github.event_path }}
+        echo ${{ github.workspace }}
+        echo ${{ github.action_repository }}
+        echo ${{ github.action_repository_owner }}
+        echo ${{ github.action_repository_name }}
+        echo ${{ github.action_ref }}
+        echo ${{ github.action_sha }}
+        echo ${{ github.run_id }}
+        echo ${{ github.run_number }}
+        echo ${{ github.run_attempt }}
+        echo ${{ github.event_name }}
+        echo ${{ github.event }}
+      shell: bash
+        
+    - name: echo2
+      run: |
+        # github.ref_nameがmasterかどうかを判定
+        if [ "${{ github.ref_name }}" = "master" ]; then
+          echo "master"
+        elif [ "${{ github.ref_name }}" = "develop" ]; then
+          echo "develop"
+        else
+          echo "not master"
+        fi
+      shell: bash
+
+    - name: Set pkg
+      id: set-pkg
+      run: |
+        echo "pkg=abc" >> $GITHUB_OUTPUT
+      shell: bash

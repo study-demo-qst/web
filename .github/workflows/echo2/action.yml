@@ -1,0 +1,15 @@
+# このファイル内ではsecretsは扱えない
+name: 'Set Up Echo'
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: echo
+      run: |
+        echo "${GITHUB_REF}"
+        echo "-----------------"
+        echo ${{ steps.echo.outputs.pkg }}
+        echo "-----------------"
+      shell: bash
+        

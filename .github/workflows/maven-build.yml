@@ -1,0 +1,88 @@
+name: mavven build
+
+on:
+  # push:
+  #   paths-ignore: 
+  #     - 'create-module-release.yml'
+  #     - 'create-module-snapshot.yml'
+  #     - 'setup/*.yml'
+  workflow_dispatch:
+    inputs:
+      masterブランチでビルド＆テストを実行(関連リポジトリ含む)。リリースを作成:
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: none
+
+    steps:
+    - name: skip
+      run: |
+        echo "${GITHUB_REF}"
+
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows/setup
+      with:
+        build_type: 'push'
+
+    - name: Build with Maven
+      run: mvn --settings ./settings.xml clean install -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: none
+
+    steps:
+    - name: skip
+      run: |
+        echo "${GITHUB_REF}"
+
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+    
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows/setup
+      with:
+        build_type: 'push'
+
+    - name: Test
+      run: mvn --settings ./settings.xml test -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+    
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows/setup
+      with:
+        build_type: 'push'
+
+    - name: Deploy to GitHub Packages
+      run: mvn --settings ./settings.xml deploy -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}

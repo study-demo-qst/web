@@ -1,0 +1,281 @@
+name: create release module3
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      masterブランチでビルド＆テストを実行(関連リポジトリ含む)。リリースを作成:
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+
+    - name: Install OpenJDK 8
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y openjdk-8-jdk
+        echo "JAVA_HOME=$(which java)" >> $GITHUB_ENV
+        echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+        echo "-----------------------------"
+        apt-cache policy openjdk-8-jdk
+        echo "-----------------------------"
+        apt-cache show openjdk-8-jdk
+      shell: bash
+
+    - name: echo
+      run: |
+        echo ${{ github.run_number }}
+
+    - name: Token発行（Github App）
+      id: generate_token
+      uses: tibdex/github-app-token@v1.8
+      with:
+        app_id: ${{ secrets.APP_ID }}
+        private_key: ${{ secrets.PRIVATE_KEY }}
+
+    - name: Token確認
+      env:
+        TOKEN: ${{ steps.generate_token.outputs.token }}
+      run: |
+        echo "Access Token: ghs_"
+        echo "Access Token: ${TOKEN:4}"
+
+    # 最初にすべてのリポジトリをチェックアウトする
+    - name: Checkout common
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/common'
+        ref: 'master'
+        token: ${{ secrets.REPO_ETERNAL2 }}
+        path: 'common'
+
+    - name: Checkout logic
+      uses: actions/checkout@v3
+      with:
+        repository: 'study-demo-qst/logic'
+        ref: 'master'
+        token: ${{ secrets.REPO_ETERNAL2 }}
+        path: 'logic'
+
+    - name: Checkout web-customer
+      uses: actions/checkout@v3
+      with:
+        path: 'web-customer'
+        # web-customerリポジトリのワークフロー内で実行されているので、refやrepositoryの指定は不要
+
+    - name: Set Up
+      id: setup
+      uses: ./web-customer/.github/workflows/setup
+
+    # 順番にビルドする
+    - name: Build and install common project
+      id: build_common
+      run: |
+        cd common
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build logic project with Maven
+      id: build_logic
+      run: |
+        cd logic
+        mvn --settings ../common/settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Build web-customer project with Maven
+      id: build_web_customer
+      run: |
+        cd web-customer
+        mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        echo "branch=$(git branch --show-current)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    # タグ名を設定
+    - name: Set tag name
+      id: set_tag_name
+      run: echo "TAG_NAME=${{ steps.setup.outputs.build_time }}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+    # 各リポジトリにタグを張る
+    - name: Tag common repository
+      run: |
+        cd common
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag logic repository
+      run: |
+        cd logic
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+    - name: Tag web-customer repository
+      run: |
+        cd web-customer
+        git tag ${{ steps.set_tag_name.outputs.tag_name }}
+        git push origin ${{ steps.set_tag_name.outputs.tag_name }}
+
+
+    # タグを生成する 「{YYYY.MM.DD}-{当日リリース回数}」
+    - name: Generate release tag
+      id: release_tag
+      run: |
+        today=$(date +'%Y.%m.%d.%H.%M.%S')
+
+        # pre_release_date=$(echo ${{ steps.pre_tag.outputs.pre_tag }} | awk -F'-' '{print $1}')
+        # pre_release_count=$(echo ${{ steps.pre_tag.outputs.pre_tag }} | awk -F'-' '{print $2}')
+        # if [[ ! $pre_release_date = $today ]]; then
+        #   echo "init count"
+        #   pre_release_count=0
+        # fi
+        # echo "::set-output name=release_tag::$today-$(($pre_release_count + 1))"
+
+        echo "name=$today-$(($pre_release_count + 1))" >> $GITHUB_OUTPUT
+        
+    # タグを切り、リリースノートを作成する
+    # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#create-a-release
+    - name: Create Release
+      id: create_release
+      run: |
+        body=$(echo -e "bbb2
+        ccc1
+        aaa/bbb
+        aaa-bbb2-ewerj-3jlk3
+        ddd1")
+
+        echo "body=$body"
+
+        # JSON データをエスケープしてフォーマットする
+        json_data=$(jq -n \
+                --arg tag_name ${{ steps.release_tag.outputs.name }} \
+                --argjson draft "false" \
+                --argjson prerelease "true" \
+                --arg body "$body" \
+                '{
+                  tag_name: $tag_name,
+                  draft: $draft,
+                  prerelease: $prerelease,
+                  body: $body
+                }')
+
+        response=$(curl -L \
+          -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${{ github.repository }}/releases \
+          -d "$json_data")
+        
+        upload_url=$(echo "$response" | jq -r .upload_url)
+        echo "upload_url=$upload_url"
+        formatted_url=$(echo "$upload_url" | sed 's/{?name,label}/?name=web-customer-${{ steps.setup.outputs.build_time }}.jar/')
+        echo "formatted_url=$formatted_url"
+        echo "upload_url=$formatted_url" >> $GITHUB_OUTPUT
+
+    - name: Upload Asset to Release
+      run: |
+        curl -L \
+          -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          -H "Content-Type: application/octet-stream" \
+          "${{ steps.create_release.outputs.upload_url }}" \
+          --data-binary "@web-customer/target/web-customer-${{ steps.setup.outputs.build_time }}.jar"
+
+    # - name: Upload build artifact
+    #   uses: actions/upload-artifact@v3
+    #   with:
+    #     name: snapshot module
+    #     path: web-customer/target/*.jar
+
+    # GitHubリリースを作成
+    # - name: Create Release
+    #   id: create_release
+    #   uses: actions/create-release@v1
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   with:
+    #     tag_name: ${{ steps.set_tag_name.outputs.tag_name }}
+    #     release_name: Release ${{ steps.set_tag_name.outputs.tag_name }}
+    #     draft: true
+    #     prerelease: false
+    #     body: |
+    #       ビルドに使用したリポジトリとブランチ
+    #       common: ${{ steps.build_common.outputs.branch }}
+    #       logic: ${{ steps.build_logic.outputs.branch }}
+    #       web-customer: ${{ steps.build_web_customer.outputs.branch }}
+          
+    #       ビルドに使用したタグ: ${{ steps.set_tag_name.outputs.tag_name }}
+    #       ビルドログ: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      
+    # - name: Upload Artifact to GitHub Release
+    #   uses: actions/upload-release-asset@v1
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   with:
+    #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+    #     asset_path: web-customer/target/web-customer-${{ steps.setup.outputs.build_time }}.jar
+    #     asset_name: web-customer.jar
+    #     asset_content_type: application/java-archive
+
+  # Job to delete releases older than three months
+  delete_old_releases:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: none
+    needs: [build]  # Assuming you want to delete old releases after the build job
+    steps:
+    # - name: Delete Old Releases2
+    #   run: |
+    #     curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+    #          -H "Accept: application/vnd.github.v3+json" \
+    #          "https://api.github.com/repos/${{ github.repository }}/releases" | \
+    #          jq -r '.[] | select(.created_at < "'$(date --date="-1 days ago" --iso-8601)'") | .id'
+
+    # - name: Delete Old Releases
+    #   run: |
+    #     curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+    #          -H "Accept: application/vnd.github.v3+json" \
+    #          "https://api.github.com/repos/${{ github.repository }}/releases" | \
+    #          jq -r '.[] | select(.created_at < "'$(date --date="-1 days ago" --iso-8601)'") | .id' | \
+    #          while read release_id; do
+    #            echo "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+    #            echo "Deleting release $release_id"
+    #            curl -X DELETE \
+    #                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+    #                 -H "Accept: application/vnd.github.v3+json" \
+    #                 "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+    #          done
+
+    - name: Delete Old Releases3
+      run: |
+        # GitHub APIを呼び出して、古いリリースを取得
+        releases=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                        -H "Accept: application/vnd.github.v3+json" \
+                        "https://api.github.com/repos/${{ github.repository }}/releases" | \
+                  jq -r '.[] | select(.created_at < "'$(date --date="10 days ago" --iso-8601)'") | .id')
+
+        # 取得したリリースIDを表示
+        echo "Retrieved release IDs:"
+        echo "$releases"
+
+        # 取得したリリースIDを使って、それぞれを削除
+        echo "$releases" | while read release_id; do
+          echo "Deleting release $release_id"
+          curl -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$release_id"
+        done

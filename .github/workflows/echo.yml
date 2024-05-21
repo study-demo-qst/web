@@ -1,0 +1,72 @@
+name: echo
+
+on:
+  # push:
+  workflow_dispatch:
+    inputs:
+      common_branch:
+        description: 'commonブランチ名(※)'
+        required: false
+        default: ''
+      logic_branch:
+        description: 'logicブランチ名(※)'
+        required: false
+        default: ''
+      label:
+        description: '※ブランチ未入力時の動作'
+        type: string
+        required: false
+        default: 'Workflowブランチ(なければdevelop)'
+      test:
+        description: 'テスト実行(参照リポジトリ含む)'
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: write-all
+
+    steps:
+
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+
+    - name: echo
+      run: |
+        repo_name="xxx.com.${{ github.repository }}"
+        pkg="${repo_name////.}"
+        echo $pkg
+        >&2 echo "Error: Your error message"
+        echo "::error::Your error message"
+        echo "::set-output name=pkg::$pkg"
+        exit 2
+      shell: bash
+
+    - name: echo2
+      run: |
+        # github.ref_nameがmasterかどうかを判定
+        if [ "${{ github.ref_name }}" = "master" ]; then
+          echo "master"
+        elif [ "${{ github.ref_name }}" = "develop" ]; then
+          echo "develop"
+        else
+          echo "not master"
+        fi
+      shell: bash
+        
+    - name: Set Up Echo
+      id: echo
+      uses: ./.github/workflows/echo
+
+    - name: echo3
+      run: |
+        echo "# -----------------"
+        echo ${{ steps.echo.outputs.pkg }}
+        echo "# -----------------"
+      shell: bash
+        
+    - name: Set Up Echo2
+      id: echo2
+      uses: ./.github/workflows/echo2

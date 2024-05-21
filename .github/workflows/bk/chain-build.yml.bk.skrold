@@ -1,0 +1,81 @@
+name: Create snapshot module
+
+on:
+  workflow_dispatch:    
+    inputs:
+      common_branch:
+        description: 'common branch. 空はComboBoxと同じ'
+        required: false
+        default: 'master'
+      logic_branch:
+        description: 'logic branch. 空はComboBoxと同じ'
+        required: false
+        default: 'master'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: none
+
+    steps:
+      - name: ビルド情報
+        id: info
+        run: |
+          echo "common branch=${{ inputs.common_branch }}"
+          echo "logic branch=${{ inputs.logic_branch }}"
+          echo "web-customer branch=${{ github.ref_name }}"
+        shell: bash
+
+      # 最初にすべてのリポジトリをチェックアウトする
+      - name: Checkout common#${{ inputs.common_branch }}
+        uses: actions/checkout@v3
+        with:
+          repository: 'study-demo-qst/common'
+          ref: ${{ inputs.common_branch }}
+          token: ${{ secrets.REPO_PKGWRITE }}
+          path: 'common'
+
+      - name: Checkout logic#${{ inputs.logic_branch }}
+        uses: actions/checkout@v3
+        with:
+          repository: 'study-demo-qst/logic'
+          ref: ${{ inputs.logic_branch }}
+          token: ${{ secrets.REPO_PKGWRITE }}
+          path: 'logic'
+
+      - name: Checkout web-customer#${{ github.ref_name}}
+        uses: actions/checkout@v3
+        with:
+          path: 'web-customer'
+          # web-customerリポジトリのワークフロー内で実行されているので、refやrepositoryの指定は不要です。
+
+      - name: Set Up
+        id: setup
+        uses: ./web-customer/.github/workflows/setup
+
+      # チェックアウト後、順番にビルドする
+      - name: Build and install common project
+        run: |
+          cd common
+          mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        shell: bash
+
+      - name: Build logic project with Maven
+        run: |
+          cd logic
+          mvn --settings ../common/settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        shell: bash
+
+      - name: Build web-customer project with Maven
+        run: |
+          cd web-customer
+          mvn --settings ./settings.xml clean install -DskipTests -Dbuild_time=${{ steps.setup.outputs.build_time }}
+        shell: bash
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: snapshot module
+          path: web-customer/target/*.jar

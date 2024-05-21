@@ -1,0 +1,114 @@
+# このファイル内ではsecretsは扱えない
+name: 'Set Up Build Environment'
+inputs:
+  build_type:
+    description: 'release/snapshot/push'
+    required: true
+    default: 'release'
+
+outputs:
+  build_time:
+    description: 'The build number'
+    value: ${{ steps.set-vers.outputs.build_time }}
+  pkg:
+    description: 'package name'
+    value: ${{ steps.set-pkg.outputs.pkg }}
+
+runs:
+  using: "composite"
+  steps:
+  - name: Set build time
+    id: set-vers
+    run: |
+      # コミットpushとタグpushで分岐
+      if [[ ${{ github.ref }} == refs/tags/* ]]; then
+        BRANCH_NAME=$(echo "${{ github.ref_name}}" | grep -o '[^_]*$')
+      else
+        BRANCH_NAME='${{ github.ref_name}}'
+      fi
+
+      # build_typeの値によって分岐
+      if [[ '${{ inputs.build_type }}' == 'release' ]]; then
+        # prefix='$(date +%Y%m)-${BRANCH_NAME}'
+        prefix=$(date +%Y%m)-${BRANCH_NAME}
+        suffix=''
+      elif [[ '${{ inputs.build_type }}' == 'snapshot' ]]; then
+        prefix=${BRANCH_NAME}
+        suffix='-SNAPSHOT'
+      elif [[ '${{ inputs.build_type }}' == 'push' ]]; then
+        prefix='latest-${BRANCH_NAME}'
+        suffix='-SNAPSHOT'
+      else
+        echo 'build_type is invalid.'
+        exit 1
+      fi
+
+      echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+      echo "build_time=${prefix}${suffix}" | sed "s/\//-/g" >> $GITHUB_OUTPUT
+      
+      echo $(date +%Y%m)-${BRANCH_NAME}
+      echo "## '$(date +%Y%m)-${BRANCH_NAME}'"
+      echo "## BRANCH_NAME=${BRANCH_NAME}"
+      echo "## prefix=${prefix}"
+      echo "## suffix=${suffix}"
+      build_time2=${prefix}${suffix} | sed "s/\//-/g"
+      echo "## build_time2=${build_time2}"
+      echo "## build_time=${prefix}${suffix}"
+      
+      # echo "build_time=$(date +%Y%m)-${GITHUB_REF#refs/heads/}-SNAPSHOT" | sed "s/\//-/g" >> $GITHUB_OUTPUT
+    shell: bash
+
+  - name: Set pkg
+    id: set-pkg
+    run: |
+      echo "pkg=com.example.web" >> $GITHUB_OUTPUT
+    shell: bash
+
+  - name: Install OpenJDK 8
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y openjdk-8-jdk
+      echo "JAVA_HOME=$(which java)" >> $GITHUB_ENV
+      echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+      apt-cache policy openjdk-8-jdk
+    shell: bash
+      
+# https://downloads.corretto.aws/#/downloads?version=8
+  # - name: Install Corretto 8 (1.8.0_312)
+  #   run: |
+  #     wget -O corretto.tar.gz https://corretto.aws/downloads/resources/8.312.07.1/amazon-corretto-8.312.07.1-linux-x64.tar.gz
+  #     tar -xzf corretto.tar.gz -C /opt
+  #     echo "JAVA_HOME=/opt/amazon-corretto-8.312.07.1-linux-x64" >> $GITHUB_ENV
+  #     echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+  #   shell: bash
+
+  # - name: Install Corretto 8 (1.8.0_312)
+  #   run: |
+  #     wget -O corretto.deb https://corretto.aws/downloads/resources/8.312.07.1/java-1.8.0-amazon-corretto-jdk_8.312.07-1_amd64.deb
+  #     sudo dpkg -i corretto.deb
+  #     echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-amazon-corretto" >> $GITHUB_ENV
+  #     echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+  #   shell: bash
+
+  # - name: Install Corretto 8 (1.8.0_312)
+  #   run: |
+  #     wget -O corretto.tar.gz https://corretto.aws/downloads/resources/8.312.07.1/java-1.8.0-amazon-corretto-jdk_8.312.07-1_amd64.deb
+  #     mkdir -p /opt/corretto
+  #     tar -xzf corretto.tar.gz -C /opt/corretto
+  #     echo "JAVA_HOME=/opt/corretto" >> $GITHUB_ENV
+  #     echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+  #   shell: bash
+
+  # - name: Install OpenJDK 8 (1.8.0_312)
+  #   run: |
+  #     wget -O openjdk.tar.gz "ダウンロードURL"
+  #     mkdir -p /opt/openjdk
+  #     tar -xzf openjdk.tar.gz -C /opt/openjdk
+  #     echo "JAVA_HOME=/opt/openjdk/jdk1.8.0_312" >> $GITHUB_ENV
+  #     echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+
+  # - name: Set up JDK 8
+  #   uses: actions/setup-java@v3
+  #   with:
+  #     java-version: '8'
+  #     distribution: 'temurin'

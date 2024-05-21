@@ -1,0 +1,105 @@
+name: Build on push
+
+on:
+  # push:
+  #   paths-ignore: 
+  #     - 'chain-build.yml'
+  #     - 'setup/*.yml'
+  workflow_dispatch:    
+    inputs:
+      common_branch:
+        description: 'common branch. 空はComboBoxと同じ'
+        required: false
+        default: 'master'
+      logic_branch:
+        description: 'logic branch. 空はComboBoxと同じ'
+        required: false
+        default: 'master'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: none
+
+    steps:
+    - name: skip
+      run: |
+        echo "${GITHUB_REF}"
+        echo "${GITHUB_REF#refs/head/}"
+        echo "${GITHUB_REF#refs/heads/}"
+        echo "${GITHUB_REF#refs/tags/}"
+        echo "${{ github.ref_name}}"
+        echo "-------"
+        if [[ ${{ github.ref }} == refs/tags/* ]]; then
+          BRANCH_NAME=$(echo "${{ github.ref_name}}" | grep -o '[^_]*$')
+          echo "latest2-${BRANCH_NAME}"
+        else
+          echo "latest-${{ github.ref_name}}"
+        fi
+
+    - uses: actions/checkout@v3
+
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows
+
+    - name: debug
+      run: |
+        echo "Build time is ${{ steps.setup.outputs.build_time }}"
+
+    - name: Build with Maven
+      run: mvn --settings ./settings.xml clean install -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: none
+
+    steps:
+    - name: skip
+      run: |
+        echo "${GITHUB_REF}"
+
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+    
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows
+
+    - name: Test
+      run: mvn --settings ./settings.xml test -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    # Set Up前にsrc必要
+    - uses: actions/checkout@v3
+    
+    - name: Set Up
+      id: setup
+      uses: ./.github/workflows
+
+    - name: Deploy to GitHub Packages
+      run: mvn --settings ./settings.xml deploy -Dbuild_time=${{ steps.setup.outputs.build_time }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.REPO_PKGWRITE }}
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ steps.setup.outputs.build_time }}
+        path: target/*.jar
