@@ -20,6 +20,13 @@
             <version>${spring.boot.version}</version>
         </dependency>
 
+        <!-- Thymeleaf -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+
         <!-- Logic module -->
         <dependency>
             <groupId>com.example</groupId>
